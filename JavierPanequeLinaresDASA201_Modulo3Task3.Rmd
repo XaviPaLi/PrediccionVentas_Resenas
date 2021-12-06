@@ -1,0 +1,2003 @@
+---
+title: "PREDICCIÓN DEL VOLUMEN DE VENTAS E IMPACTO DE LAS RESEÑAS"
+author: "Javier Paneque Linares"
+date: "10/12/2021"
+output: 
+  bookdown::html_document2:
+    code_folding: hide
+    toc: true
+    toc_depth: 5
+    theme: united
+    fig_caption: true
+    number_sections: true
+    global_numbering: true
+toc-title: "ÍNDICE"
+---
+
+```{r include=FALSE}
+#Se cargan las librerías necesarias
+library('bookdown')
+library('dplyr')
+library('readr')
+library('knitr')
+library('ggplot2')
+library('lattice')
+library('plyr')
+library('tidyr')
+library('kableExtra')
+library("gvlma")
+library('gridExtra')
+library('caTools')
+library('caret')
+library('DataCombine')
+library('corrplot')
+library('Hmisc')
+library('randomForest')
+library('e1071')
+library('partykit')
+library('kernlab')
+library('gbm')
+library('magrittr')
+library('MASS')
+library('partykit')
+library('rpart.plot')
+library('kknn')
+library('corrplot')
+library('ggpubr')
+library('missForest')
+library('party')
+knitr::opts_chunk$set(warning = FALSE)
+```
+
+# CONOCIMIENTO DEL PROBLEMA
+
+El equipo de ventas ha seguido de cerca el rendimiento en ventas de distintos tipos de productos y les gustaría que analizaramos y predijéramos por qué y cómo se ve afectado cada producto.
+
+Danielle Sherman, CTO of Blackwell Electronics nos pide analizar los datos históricos de ventas y predecir el volumen de ventas para una lista de nuevos productos. Esto ayudará al equipo de ventas a comprender mejor cómo los tipos de productos pueden ver afectadas sus ventas en toda la empresa.
+
+Los objetivos son:
+
+* **Predecir las ventas de los siguientes productos: Ordenadores, portátiles, netbooks y teléfonos móviles.**
+* **Evaluar el impacto en ventas que tienen las reseñas de los clientes sobre los productos y servicios.**
+
+# RECOLECCIÓN DE LOS DATOS
+
+La recolección de datos históricos nos proporciona la información que necesitamos. Nos adjuntan dos archivos:
+
+* **existingproductattributes2017.csv**: contiene datos históricos de ventas de los productos.
+
+* **newproductattributes2017.csv**: contiene datos de nuevos productos cuyo volumen de ventas debemos de predecir.
+
+## CARGADO DE LOS DATOS 
+
+Se cargan los datos, concretamente los archivos *existingproductattributes2017.csv* y *newproductattributes2017.csv*:
+
+```{r}
+#Se cargan los datos
+EPA <- read.csv("existingproductattributes2017.csv")
+NPA <- read.csv("newproductattributes2017.csv")
+#Número de datos que tenemos
+sprintf("Número de productos registrados en los datos históricos: %s",length(EPA[,1]))
+sprintf("Número de nuevos productos: %s",length(NPA[,1]))
+```
+
+## DESCRIPCIÓN DE LAS VARIABLES 
+
+Se describen las variables que nos han proporcionado.
+
+* Variables que contiene el conjunto de datos:
+  + **ProductType**: Tipo de producto. Existen las siguientes categorias:
+    - PC
+    - Laptop
+    - Accessories
+    - Software
+    - Display
+    - Printer
+    - PrinterSupplies
+    - ExtendedWarranty
+    - Netbook
+    - Tablet
+    - Smartphone
+    - GameConsole
+  
+  + **ProductNum**: Número identificativo del producto.
+  
+  + **Price**: Precio del producto.
+  
+  + **x5StarReviews**: Reseñas puntuadas con 5 estrellas.
+  
+  + **x4StarReviews**: Reseñas puntuadas con 4 estrellas.
+  
+  + **x3StarReviews**: Reseñas puntuadas con 3 estrellas.
+  
+  + **x2StarReviews**: Reseñas puntuadas con 2 estrellas.
+  
+  + **x1StarReviews**: Reseñas puntuadas con 1 estrella.
+  
+  + **PositiveServiceReview**: Número de reseñas positivas referentes al servicio.
+  
+  + **NegativeServiceReview**: Número de reseñas negativas referentes al servicio.
+  
+  + **RecommendProduct**: Valoración en la recomendación del producto.
+  
+  + **BestSellerRank**: Posición en el ranking de más vendidos.
+  
+  + **ShippingWeight**: Peso del producto que figura en el envio.
+  
+  + **ProductDepth**: Longitud de la profundidad del producto.
+  
+  + **ProductWidth**: Longitud de la anchura del producto.
+  
+  + **ProductHeight**: Longitud de la altura del producto.
+  
+  + **ProfitMargin**: Fracción del margen de beneficio.
+  
+  + **Volume**: Volumen de ventas.
+
+* Tipo variables
+  + Datos Históricos:
+
+```{r}
+#Se comprueba el tipo de variable que contiene
+str(EPA)
+```
+
+  + Nuevos Productos:
+  
+```{r}
+#Se comprueba el tipo de variable que contiene
+str(NPA)
+```
+
+# PREPARACIÓN DE LOS DATOS
+
+En este apartado se manipularán los datos para evitar problemas de formato o valores incorrectos que induzcan a error, etc.
+
+## LIMPIEZA DE DATOS
+
+En primer lugar limpiamos los datos.
+
+### VALORES INCORRECTOS
+
+Aquí tratamos de identificar los valores fuera de rango o valores que no tengan sentido para nuestras variables.
+
+Mostramos un resumen estadístico de los datos:
+
+* Datos Históricos
+```{r}
+#Resumen de los principales estadísticos
+summary(EPA)
+```
+
+* Nuevos Productos
+```{r}
+#Resumen de los principales estadísticos
+summary(NPA)
+```
+
+Observamos que todas las variables están dentro de los rangos esperados con las siguientes excepciones:
+
+* La variable *BestSellerRank* muestra 15 missing values de un total de 80 datos, cerca del 20%.
+
+* Algunos productos tienen una longitud de profundidad, altura y anchura igual a cero. Se verifica que estos valores se corresponden a productos no físicos.
+
+* La suma total de reseñas es, en ocasiones, mayor al volumen total de ventas. Podría tratarse de productos que han sido devueltos, no se realizará ninguna acción sobre este hecho.
+
+### VALORES DUPLICADOS
+
+Revisamos si existen valores duplicados para ambos conjuntos de datos:
+
+```{r}
+#Datos duplicados
+sprintf('Datos duplicados para Datos Históricos: %s',unique(duplicated(EPA)))
+sprintf('Datos duplicados para Nuevos Productos: %s',unique(duplicated(NPA)))
+```
+
+No tenemos ninguna fila repetida.
+
+#### NÚMERO DE PRODUCTO
+
+A pesar de no haber datos duplicados, debemos hacer una revisión adicional. El número de producto identifica de qué producto se trata. Por esta razón, este valor no se debe repetir ni dentro un mismo conjunto de datos ni en el global. Comprobamos que se cumple esta condición.
+
+```{r}
+
+sprintf('Producto duplicado para Datos Históricos: %s',unique(duplicated(EPA$ProductNum)))
+sprintf('Producto duplicado para Nuevos Productos: %s',unique(duplicated(NPA$ProductNum)))
+sprintf('Producto duplicado para el Global de Todos los Datos: %s',
+        c(EPA$ProductNum, NPA$ProductNum) %>% duplicated() %>% unique())
+```
+
+No hay duplicidad en los productos.
+
+### VALORES ATÍPICOS
+
+Es necesario conocer la distribución de los datos para identificar los valores atípicos. Por este motivo, los valoraremos durante el análisis exploratorio.
+
+### CAMBIO DE CLASE
+
+Tenemos varias variables categóricas que se describen mediante valores enteros. Vamos a modificar la clase de estas variables a variables tipo factor.
+
+```{r}
+#Vector nombres tipo producto
+tipo_name <- c('PC','Laptop','Netbook','Smartphone','Accessories','Software',
+               'Display','Printer','PrinterSupplies','ExtendedWarranty',
+               'Tablet','GameConsole')
+#Se reconvierte la variable tipo de producto en clase factor
+EPA$ProductType <- factor(EPA$ProductType,levels=tipo_name)
+NPA$ProductType <- factor(NPA$ProductType,levels=tipo_name)
+#Se reconvierte la variable número de producto en clase factor
+EPA$ProductNum <- factor(EPA$ProductNum)
+NPA$ProductNum <- factor(NPA$ProductNum)
+```
+
+Convertimos las variables categóricas en binarias 0-1:
+
+```{r}
+#dummify the data
+EPA <- dummyVars(" ~ .", data = EPA['ProductType']) %>% predict(newdata = EPA['ProductType']) %>% data.frame() %>% cbind(EPA)
+#dummify the data
+NPA <- dummyVars(" ~ .", data = NPA['ProductType']) %>% predict(newdata = NPA['ProductType']) %>% data.frame() %>% cbind(NPA)
+
+```
+
+## RENOMBRAR VARIABLES
+
+Cambiamos el nombre de las variables:
+
+```{r}
+#Vectores nombres
+Nuevos_Nombres <- c('PC','Laptop','Accessories','Software','Display',
+                    'Printer','Supplies','Warranty','Netbook','Tablet',
+                    'Smartphone','GC','Tipo','ID','Precio','Star5','Star4',
+                    'Star3','Star2','Star1','SerPos','SerNeg','Reco','Ranking',
+                    'Peso','Prof','Ancho','Alto','Beneficio','Volumen')
+Ordenar_Nombres <- c('Volumen','Star5','Star4','Star3','Star2','Star1',
+                     'SerPos','SerNeg','Precio','Reco','Ranking','Peso',
+                     'Prof','Ancho','Alto','Beneficio','Tipo','PC','Laptop',
+                     'Netbook','Smartphone','Display','Printer','Supplies',
+                     'Warranty','Tablet','Software','Accessories','GC','ID')
+#Cambiamos nombres
+names(EPA) <- Nuevos_Nombres
+names(NPA) <- Nuevos_Nombres
+#Ordenamos columnas
+EPA <- EPA[Ordenar_Nombres]
+NPA <- NPA[Ordenar_Nombres]
+```
+
+# ANÁLISIS EXPLORATORIO
+
+El objetivo es describir las variables mostrando cómo se distribuyen y qué relaciones existen entre ellas.
+
+## ANÁLISIS UNIVARIANTE
+
+Empecemos por el primer punto: ¿cómo se distribuyen las variables?
+
+### TIPO DE PRODUCTO
+
+Veamos la distribución de la variable salario:
+
+```{r Tipo, fig.cap="Distribución de la variable Tipo de Producto"}
+#Barplot plot Tipo EPA
+EPA_Tipo <- ggplot(EPA, aes(x=Tipo,y=..count..))+
+  geom_bar(color="black",fill='lightblue')+
+  ggtitle('Tipo de Producto - Datos Históricos')+
+  scale_x_discrete(guide=guide_axis(n.dodge=2))+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Nº Ocurrencias",limits=c(0,28),breaks=seq(0,28,4))
+#Barplot plot Tipo NPA
+NPA_Tipo <- ggplot(NPA, aes(x=Tipo,y=..count..))+
+  geom_bar(color="black",fill='indianred1')+
+  ggtitle('Tipo de Producto - Nuevos Productos')+
+  scale_x_discrete(guide=guide_axis(n.dodge=2))+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Nº Ocurrencias",limits=c(0,28),breaks=seq(0,28,4))
+#Se muestra el gráfico
+grid.arrange(EPA_Tipo,NPA_Tipo, nrow=2)
+```
+
+Para algunos tipos de productos tenemos muy pocas muestras, remarcando 
+
+### NÚMERO DE PRODUCTO
+
+Esta variable es un identificador y única para cada producto por lo que no tiene sentido revisar su distribución.
+
+### PRECIO
+
+Mostramos la distribución de la variable precio:
+
+```{r Precio, fig.cap="Distribución de la variable Precio"}
+#Violin plot Precio EPA
+EPA_Precio <- ggplot(EPA, aes(x=factor(0),y=Precio))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Precio - Datos Históricos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Precio",limits=c(0,2250),breaks=seq(0,2250,200))
+#Violin plot Precio NPA
+NPA_Precio <- ggplot(NPA, aes(x=factor(0),y=Precio))+
+  geom_violin(color="black",fill='indianred1')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Precio - Nuevos Productos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Precio",limits=c(0,2250),breaks=seq(0,2250,200))
+#Se muestra el gráfico
+grid.arrange(EPA_Precio,NPA_Precio, ncol=2)
+```
+
+Los nuevos productos tienen unos precios distribuidos alrededor de una mediana más alta.
+
+### RESEÑAS
+
+Mostramos la distribución del número de reseñas recibidas:
+
+```{r Reseña, fig.cap="Distribución de la variable Reseña",fig.width=10,fig.height=6}
+#Violin plot Reseña EPA
+EPA_Reseña <- gather(EPA,Star,N,Star5,Star4,Star3,Star2,Star1,factor_key = TRUE) %>% 
+              ggplot(aes(x=Star,y=N))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Reseñas - Datos Históricos')+
+  theme(axis.text.x = element_text(color='black',size=10,angle=0),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Número de Reseñas",limits=c(0,70),breaks=seq(0,70,10))+
+  scale_x_discrete(name ="Valor de la Reseña")
+#Violin plot Reseña NPA
+NPA_Reseña <- gather(NPA,Star,N,Star5,Star4,Star3,Star2,Star1,factor_key = TRUE) %>% 
+              ggplot(aes(x=Star,y=N))+
+  geom_violin(color="black",fill='indianred1')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Reseñas - Nuevos Productos')+
+  theme(axis.text.x = element_text(color='black',size=10,angle=0),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Número de Reseñas",limits=c(0,70),breaks=seq(0,70,10))+
+  scale_x_discrete(name ="Valor de la Reseña")
+#Se muestra el gráfico
+grid.arrange(EPA_Reseña,NPA_Reseña, nrow=2)
+```
+
+Se observan claros outliers en todas las variables referentes a reseñas.
+
+Se decide manipular estas variables para sintetizar su información en dos nuevas variables: el valor medio de las reseñas y el número total de estas. A continuación se muestra la distribución de estas nuevas variables.
+
+```{r}
+#Se calcula la reseña media
+EPA$StarM <- EPA %>% with((Star5*5+Star4*4+Star3*3+Star2*2+Star1)/(Star5+Star4+Star3+Star2+Star1))
+NPA$StarM <- NPA %>% with((Star5*5+Star4*4+Star3*3+Star2*2+Star1)/(Star5+Star4+Star3+Star2+Star1))
+#Se calcula el número de reseñas totales
+EPA$NRes <- EPA %>% with(Star5+Star4+Star3+Star2+Star1)
+NPA$NRes <- NPA %>% with(Star5+Star4+Star3+Star2+Star1)
+```
+
+```{r NRes, fig.cap="Distribución del número total de reseñas",fig.width=8}
+#Violin plot N Reseñas EPA
+EPA_NReseñas <- ggplot(EPA,aes(x=factor(0),y=NRes))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Reseñas - Datos Históricos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Número de Reseñas",limits=c(0,3000),breaks=seq(0,3000,500))
+#Violin plot N Reseñas NPA
+NPA_NReseñas <- ggplot(NPA,aes(x=factor(0),y=NRes))+
+  geom_violin(color="black",fill='indianred1')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Reseñas - Datos Históricos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Número de Reseñas",limits=c(0,3000),breaks=seq(0,3000,500))
+#Se muestra el gráfico
+grid.arrange(EPA_NReseñas,NPA_NReseñas, ncol=2)
+```
+
+
+
+
+```{r StarM, fig.cap="Distribución de la valoración media del producto",fig.width=8}
+#Violin plot N Reseñas EPA
+EPA_StarM <- ggplot(EPA,aes(x=factor(0),y=StarM))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Valoración Media - Datos Históricos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Valoración Media",limits=c(0,5),breaks=seq(0,5,0.5))
+#Violin plot N Reseñas NPA
+NPA_StarM <- ggplot(NPA,aes(x=factor(0),y=StarM))+
+  geom_violin(color="black",fill='indianred1')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Valoración Media - Datos Históricos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Valoración Media",limits=c(0,5),breaks=seq(0,5,0.5))
+#Se muestra el gráfico
+grid.arrange(EPA_StarM,NPA_StarM, ncol=2)
+```
+
+De nuevo tenemos algunos outliers, debemos tener en cuenta estos valores atípicos en el modelado ya que pueden tener un alto impacto en las predicciones finales.
+
+### RESEÑAS DEL SERVICIO
+
+Mostramos la distribución del número de reseñas del servicio recibidas:
+
+```{r ReseñaServicio, fig.cap="Distribución de la variable Reseña del Servicio",fig.width=8}
+#Violin plot Reseña del Servicio EPA
+EPA_ReseñaServicio <- gather(EPA,RSP,N,SerPos,SerNeg,factor_key = TRUE) %>% 
+              ggplot(aes(x=RSP,y=N))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Reseñas del Servicio - Datos Históricos')+
+  theme(axis.text.x = element_text(color='black',size=10,angle=0),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Número de Reseñas",limits=c(0,60),breaks=seq(0,60,5))+
+  scale_x_discrete(name ="Valor de la Reseña del Servicio",
+                   labels=c('Positivas','Negativas'))
+#Violin plot Reseña del Servicio NPA
+NPA_ReseñaServicio <- gather(NPA,RSP,N,SerPos,SerNeg,factor_key = TRUE) %>% 
+              ggplot(aes(x=RSP,y=N))+
+  geom_violin(color="black",fill='indianred1')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Reseñas del Servicio - Nuevos Productos')+
+  theme(axis.text.x = element_text(color='black',size=10,angle=0),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Número de Reseñas",limits=c(0,60),breaks=seq(0,60,5))+
+  scale_x_discrete(name ="Valor de la Reseña del Servicio",
+                   labels=c('Positivas','Negativas'))
+#Se muestra el gráfico
+grid.arrange(EPA_ReseñaServicio,NPA_ReseñaServicio, ncol=2)
+```
+
+Distribuciones parecidas para ambos conjuntos de datos. La distribución muestra un alto *skew*. Varios valores atípicos.
+
+### GRADO DE RECOMENDACIÓN
+
+Mostramos la distribución del número de reseñas del servicio recibidas:
+
+```{r Recomendacion, fig.cap="Distribución del Grado de Recomendación"}
+#Violin plot Recomendación EPA
+EPA_Recomendacion <- ggplot(EPA,aes(x=factor(0),y=Reco))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Recomendación - Datos Históricos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Grado de Recomendación [0-1]",limits=c(0,1),breaks=seq(0,1,0.1))
+#Violin plot Reseña Media NPA
+NPA_Recomendacion <- ggplot(NPA,aes(x=factor(0),y=Reco))+
+  geom_violin(color="black",fill='indianred1')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Recomendación - Nuevos Productos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Grado de Recomendación [0-1]",limits=c(0,1),breaks=seq(0,1,0.1))
+#Se muestra el gráfico
+grid.arrange(EPA_Recomendacion,NPA_Recomendacion, ncol=2)
+```
+
+Los nuevos productos muestran una distribución más simétrica, parecida a una distribución normal. De nuevo tenemos valores atípicos en los datos históricos.
+
+### RANKING DE MEJOR VENDIDOS
+
+Veamos la distribución de la variable crédito:
+
+```{r Ranking, fig.cap="Distribución de la Posición en el Ranking de Ventas"}
+#Violin plot Ranking EPA
+EPA_Ranking <- ggplot(EPA,aes(x=factor(0),y=Ranking))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Ranking - Datos Históricos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Posición en el Ranking de Ventas",limits=c(0,1000),breaks=seq(0,1000,100))
+#Violin plot Ranking NPA
+NPA_Ranking <- ggplot(NPA,aes(x=factor(0),y=Ranking))+
+  geom_violin(color="black",fill='indianred1')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Ranking - Nuevos Productos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Posición en el Ranking de Ventas",limits=c(0,1000),breaks=seq(0,1000,100))
+#Se muestra el gráfico
+grid.arrange(EPA_Ranking,NPA_Ranking, ncol=2)
+```
+
+La distribución muestra un alto *skew*. También tenemos missing values.
+
+### PESO
+
+Veamos la distribución de la variable peso:
+
+```{r Peso, fig.cap="Distribución de la variable peso."}
+#Violin plot Peso EPA
+EPA_Peso <- ggplot(EPA,aes(x=factor(0),y=Peso))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Peso - Datos Históricos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Peso",limits=c(0,70),breaks=seq(0,70,5))
+#Violin plot Peso NPA
+NPA_Peso <- ggplot(NPA,aes(x=factor(0),y=Peso))+
+  geom_violin(color="black",fill='indianred1')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Peso - Nuevos Productos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Peso",limits=c(0,70),breaks=seq(0,70,5))
+#Se muestra el gráfico
+grid.arrange(EPA_Peso,NPA_Peso, ncol=2)
+```
+
+Distribuciones similares. Gran cantidad de outliers.
+
+### DIMENSIONES
+
+Veamos la distribución de las variables referentes a las dimensiones del producto:
+
+```{r Dimension, fig.cap="Distribución de las dimensiones del producto."}
+#Violin plot Dimensiones EPA
+EPA_Dimension <- gather(EPA,Dimension,N,Prof:Alto,factor_key = TRUE) %>% 
+              ggplot(aes(x=Dimension,y=N))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Dimensiones - Datos Históricos')+
+  theme(axis.text.x = element_text(color='black',size=10,angle=0),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Longitud",limits=c(0,35),breaks=seq(0,35,5))+
+  scale_x_discrete(name ="Dimensión")
+#Violin plot Dimensiones NPA
+NPA_Dimension <- gather(NPA,Dimension,N,Prof,Ancho,Alto,factor_key = TRUE) %>% 
+              ggplot(aes(x=Dimension,y=N))+
+  geom_violin(color="black",fill='indianred1')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Dimensiones - Nuevos Productos')+
+  theme(axis.text.x = element_text(color='black',size=10,angle=0),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Longitud",limits=c(0,35),breaks=seq(0,35,5))+
+  scale_x_discrete(name ="Dimensión")
+#Se muestra el gráfico
+grid.arrange(EPA_Dimension,NPA_Dimension, nrow=2)
+```
+
+Existen diferencias significativas en la distribución de las variables para cada uno de los conjuntso de datos.
+
+### BENEFICIO
+
+Veamos la distribución de la variable relativa al margen de beneficio:
+
+```{r Beneficio, fig.cap="Distribución de la variable beneficio."}
+#Violin plot Beneficio EPA
+EPA_Beneficio <- ggplot(EPA,aes(x=factor(0),y=Beneficio))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Beneficio - Datos Históricos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Margen de Beneficio",limits=c(0,1),breaks=seq(0,1,0.1))
+#Violin plot Beneficio NPA
+NPA_Beneficio <- ggplot(NPA,aes(x=factor(0),y=Beneficio))+
+  geom_violin(color="black",fill='indianred1')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Beneficio - Nuevos Productos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Margen de Beneficio",limits=c(0,1),breaks=seq(0,1,0.1))
+#Se muestra el gráfico
+grid.arrange(EPA_Beneficio,NPA_Beneficio, ncol=2)
+```
+
+Distribuciones parecidas a excepción de la presencia de outliers para los nuevos productos.
+
+### VOLUMEN DE VENTAS
+
+Veamos la distribución de la variable objetivo, volumen de ventas:
+
+```{r Volumen, fig.cap="Distribución de la variable Volumen de Ventas."}
+#Violin plot Beneficio EPA
+EPA_Volumen <- ggplot(EPA,aes(x=factor(0),y=Volumen))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Volumen de Ventas - Datos Históricos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas")
+EPA_Volumen
+```
+
+Tenemos dos outliers muy claros que se alejan en gran medida del resto. Además, estos outliers no pertenecen a ninguno de los tipos de producto de interés según los objetivos que se nos han marcado. Por estas razones, se decide eliminarlos del análisis:
+
+```{r}
+EPA <- filter(EPA, EPA$Volumen < 5000)
+```
+
+Resultando en la nueva distribución
+
+```{r Volumen2, fig.cap="Distribución de la variable Volumen de Ventas. Valores atípicos eliminados."}
+#Violin plot Beneficio EPA
+EPA_Volumen2 <- ggplot(EPA,aes(x=factor(0),y=Volumen))+
+  geom_violin(color="black",fill='lightblue')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Volumen de Ventas - Datos Históricos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas")
+EPA_Volumen2
+```
+
+## ANÁLISIS BIVARIANTE
+
+Analizamos la relación que existe entre las variables. En primer lugar realizaremos un análisis bivariante dónde se mostrará cómo se distribuye la variable objetivo en función de las demás.
+
+### VOLUMEN - TIPO
+
+Mostramos la dependencia entre el volumen de ventas y el tipo de producto:
+
+```{r VolumenTipo, fig.cap="Distribución del Volumen de Ventas según tipo de producto."}
+#Scatter plot Volumen - Tipo Producto
+EPA_VolumenTipo <- ggplot(EPA,aes(x=Tipo,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas por Tipo de Producto')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2500),breaks=seq(0,2500,500))+
+  scale_x_discrete(name ="Tipo de Producto",guide=guide_axis(n.dodge=2))
+
+#Barplot Suma Volumen - Tipo Producto
+EPA_VolumenTipoSum <- aggregate(Volumen~Tipo, data=EPA, FUN=sum) %>% 
+              ggplot(aes(x=Tipo,y=Volumen))+
+  geom_col(color="black",fill='lightblue')+
+  ggtitle('Volumen Total de Ventas por Tipo de Producto')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas Total",limits=c(0,16000),breaks=seq(0,15000,2500))+
+  scale_x_discrete(name ="Tipo de Producto",guide=guide_axis(n.dodge=2))
+#Mostramos gráfico
+grid.arrange(EPA_VolumenTipo,EPA_VolumenTipoSum, nrow=2)
+```
+
+Se observa que solo ciertos tipos de productos alcanzan determinados cifras de ventas. Sin embargo, todos los productos comparten cifras de ventas por lo que no es posibles diferenciarlos.
+
+Es decir, el volumen de ventas puede darnos pistas sobre qué tipo de producto es, pero la relación no aporta información si la miramos a la inversa: tomando el tipo de producto como variable independiente, esta no aporta información sobre le volumen de ventas.
+
+### VOLUMEN - PRECIO
+
+Mostramos la dependencia entre el volumen de ventas de un producto y el precio de este:
+
+```{r VolumenPrecio, fig.cap="Distribución del Volumen de Ventas según el precio del producto."}
+#Scatter plot Volumen - Precio
+EPA_VolumenPrecio <- ggplot(EPA,aes(x=Precio,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas según Precio del Producto')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2500),breaks=seq(0,2500,250))+
+  scale_x_continuous(name ="Precio del Producto",limits=c(0,2250),breaks=seq(0,2250,200))
+EPA_VolumenPrecio
+```
+
+Se puede observar cierta correlación ya que los mayores volúmenes de venta se concentran en rangos bajos de precio. A pesar de ello, la correlación es algo pobre.
+
+### VOLUMEN - RESEÑA
+
+Mostramos la dependencia entre el volumen de ventas de un producto y la cantidad de reseñas para cada un de sus valores:
+
+```{r VolumenResena, fig.cap="Distribución del Volumen de Ventas según el número de reseñas.",fig.height=8}
+#Scatter Plot Volumen - Reseña 5Star
+EPA_VolumenStar5 <- ggplot(EPA,aes(x=Star5,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen - 5 Estrellas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2500,500))+
+  scale_x_continuous(name ="Número de Reseñas con 5 Estrellas",limits=c(0,600),breaks=seq(0,600,100))
+#Scatter Plot Volumen - Reseña 4Star
+EPA_VolumenStar4 <- ggplot(EPA,aes(x=Star4,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen - 4 Estrellas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2500,500))+
+  scale_x_continuous(name ="Número de Reseñas con 4 Estrellas",limits=c(0,300),breaks=seq(0,300,50))
+#Scatter Plot Volumen - Reseña 3Star
+EPA_VolumenStar3 <- ggplot(EPA,aes(x=Star3,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen - 3 Estrellas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2500,500))+
+  scale_x_continuous(name ="Número de Reseñas con 3 Estrellas",limits=c(0,80),breaks=seq(0,80,10))
+#Scatter Plot Volumen - Reseña 2Star
+EPA_VolumenStar2 <- ggplot(EPA,aes(x=Star2,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen - 2 Estrellas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2500,500))+
+  scale_x_continuous(name ="Número de Reseñas con 2 Estrellas",limits=c(0,50),breaks=seq(0,50,10))
+#Scatter Plot Volumen - Reseña 1Star
+EPA_VolumenStar1 <- ggplot(EPA,aes(x=Star1,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen - 1 Estrella')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2500,500))+
+  scale_x_continuous(name ="Número de Reseñas con 1 Estrella",limits=c(0,200),breaks=seq(0,200,50))
+#Mostramos gráfico
+grid.arrange(EPA_VolumenStar5,EPA_VolumenStar4,EPA_VolumenStar3,
+             EPA_VolumenStar2,EPA_VolumenStar1,nrow=3, ncol=2)
+```
+
+Para reseñas de 5 estrellas tenemos una correlación perfecta. Las reseñas de 4 estrellas siguen mostrando una tendencia clara. A medida que el valor de la reseña baja, la correlación es cada vez más pobre. La razón es que para malas reseñas, tenemos dos tendencias contrarias:
+
+- A mayor volumen de ventas, mayor número de reseñas tendremos, entre ellas las negativas.
+- A mayor número de reseñas negativas, más clientes decidirán no comprar el producto.
+
+Por esta razón, se considera representar esta variable dándole otro enfoque. Podemos representar el volumen de ventas en función de la valoración media y el número de reseñas. Veamos estos resultados.
+
+```{r VolumenResenaMean, fig.cap="Distribución del Volumen de Ventas según la valoración media de las reseñas.",fig.width=8}
+#Scatter Plot Volumen - Reseña Media
+EPA_VolumenStarM <- ggplot(EPA,aes(x=StarM,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas - Valoración Media')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Valoración Media según Reseñas",limits=c(0,5),breaks=seq(0,5,0.5))
+#Scatter Plot Volumen - Reseña Totales
+EPA_VolumenNRes <- ggplot(EPA,aes(x=NRes,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas - Total de Reseñas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Número Total de Reseñas",limits=c(0,3000),breaks=seq(0,3000,500))
+ggarrange(EPA_VolumenStarM,EPA_VolumenNRes,nrow=1)
+```
+
+El número total de reseñas muestra una correlación muy buena a excepción de dos puntos que se alejan de la tendencia del resto. Estos puntos coinciden con los productos con mayor númeor de reseñas.
+
+La valoración media no deja en evidencia una tendencia tan clara. Para un determinado valor de la reseña media ponderada existen muchos puntos en un rango de ventas muy amplio, por lo que no parece que vaya a aportar tanta información.
+
+### VOLUMEN - RESEÑA DEL SERVICIO
+
+Mostramos la dependencia entre el volumen de ventas de un producto y la cantidad de reseñas referentes al servicio:
+
+```{r VolumenResenaServicio, fig.cap="Distribución del Volumen de Ventas según el número de reseñas del servicio.",fig.width=8}
+#Scatter Plot Volumen - Reseñas Positivas Servicio
+EPA_VolumenPositiva <- ggplot(EPA,aes(x=SerPos,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas según Reseñas Positivas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Número de Reseñas Positivas",limits=c(0,350),breaks=seq(0,350,50))
+#Scatter Plot Volumen - Reseñas Negativas Servicio
+EPA_VolumenNegativa <- ggplot(EPA,aes(x=Star4,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas según Reseñas Negativas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Número de Reseñas Negativas",limits=c(0,120),breaks=seq(0,120,10))
+#Mostramos gráfico
+grid.arrange(EPA_VolumenPositiva,EPA_VolumenNegativa,ncol=2)
+```
+Las reseñas positivas del servicio siguen una tendencia parecida al total de reseñas. Describen una tendencia clara a excepción de dos puntos muy diferenciados.
+
+Creamos una nueva variable con la fracción de reseñas positivas sobre el total y vemos la información que nos aporta para predecir la variable objetivo.
+
+```{r}
+#Se calcula la reseña media
+EPA$SerFra <- EPA %>% with(SerPos/(SerPos+SerNeg))
+#Se substituyen los 0/0 por 0
+EPA$SerFra[is.na(EPA$SerFra)] <- 0
+```
+
+```{r VolumenResenaFraccion, fig.cap="Distribución del Volumen de Ventas según la fracción de reseñas positivas."}
+#Scatter Plot Volumen - Fracción Reseñas Positivas Servicio
+EPA_VolumenFraccion <- ggplot(EPA,aes(x=SerFra,y=Volumen,))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas según Fracción de Reseñas Positivas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Fracción de Reseñas Positivas",limits=c(0,1),breaks=seq(0,1,0.1))
+#Mostramos gráfico
+EPA_VolumenFraccion
+```
+
+Hay cierta correlación pero no es tan clara como que nos porporciona el total de reseñas positivas.
+
+### VOLUMEN - GRADO DE RECOMENDACIÓN
+
+Mostramos la dependencia entre el volumen de ventas de un producto y el grado de recomendación por parte del usuario:
+
+```{r VolumenRecomendación, fig.cap="Distribución del Volumen de Ventas según el grado de recomendación."}
+#Scatter Plot Volumen - Grado de Recomendación
+EPA_VolumenRecomendacion <- ggplot(EPA,aes(x=Reco,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas según Grado de Recomendación')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2400,400))+
+  scale_x_continuous(name ="Grado de Recomendación",limits=c(0,1),breaks=seq(0,1,0.1))
+#Barplot Suma Volumen - Grado de Recomendación
+EPA_VolumenRecomendacionSum <- aggregate(Volumen~Reco, data=EPA, FUN=sum) %>% 
+              ggplot(aes(x=Reco,y=Volumen))+
+  geom_col(color="black",fill='lightblue')+
+  ggtitle('Volumen Total de Ventas según Grado de Recomendación')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,30000),breaks=seq(0,30000,5000))+
+  scale_x_continuous(name ="Grado de Recomendación",limits=c(0,1),breaks=seq(0,1,0.1))
+#Mostramos gráfico
+ggarrange(EPA_VolumenRecomendacion,EPA_VolumenRecomendacionSum, nrow=2)
+```
+
+Todos los valores del grado de recomendación comparten volúmenes de venta por lo que no es posible distinguir en base a esta variable de forma inequívoca.
+
+### VOLUMEN - RANKING
+
+Mostramos la dependencia entre el volumen de ventas de un producto y la posición que ocupa el producto en el ranking de ventas:
+
+```{r VolumenRanking, fig.cap="Distribución del Volumen de Ventas según su posición en el ranking de ventas."}
+#Scatter Plot Volumen - Ranking de ventas
+EPA_VolumenRanking <- ggplot(EPA,aes(x=Ranking,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas según Posición en Ranking de Ventas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Posición Ranking de Ventas",limits=c(0,18000),breaks=seq(0,18000,2000))
+#Mostramos gráfico
+EPA_VolumenRanking
+```
+
+Recordemos que esta variable contenía 15/80 (casi 20%) missing values. Además, no parece haber una buena correlación entre las variables. En vista a la mala correlación con la variable objetivo, se decide no tratar los missing values y descartar la variable como variable predictora.
+
+```{r}
+#Se descarta variable ranking
+EPA$Ranking <- NULL
+```
+
+### VOLUMEN - PESO
+
+Mostramos la dependencia entre el volumen de ventas de un producto y su peso:
+
+```{r VolumenPeso, fig.cap="Distribución del Volumen de Ventas según su peso."}
+#Scatter Plot Volumen - Peso
+EPA_VolumenPeso <- ggplot(EPA,aes(x=Peso,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas según su Peso')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Peso")
+#Mostramos gráfico
+EPA_VolumenPeso
+```
+
+Está claro que el peso es siempre un inconveniente y, tal y como muestra el gráfico, a mayor peso el volumen de ventas disminuye. Sin embargo, esta correlación es algo pobre por lo que deben haber otros criterios que tengan más influencia en las ventas del producto.
+
+### VOLUMEN - DIMENSIONES
+
+Mostramos la dependencia entre el volumen de ventas de un producto y sus dimensiones:
+
+```{r VolumenDimensiones, fig.cap="Distribución del Volumen de Ventas según sus dimensiones.",fig.height=8}
+#Scatter Plot Volumen - Profundidad
+EPA_VolumenProfundidad <- ggplot(EPA,aes(x=Prof,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas según su Profundidad')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Profundidad",limits=c(0,35),breaks=seq(0,35,5))
+#Scatter Plot Volumen - Ancho
+EPA_VolumenAncho <- ggplot(EPA,aes(x=Ancho,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas según su Ancho')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Ancho",limits=c(0,35),breaks=seq(0,35,5))
+#Scatter Plot Volumen - Alto
+EPA_VolumenAlto <- ggplot(EPA,aes(x=Alto,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas según su Alto')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Alto",limits=c(0,35),breaks=seq(0,35,5))
+#Mostramos gráfico
+grid.arrange(EPA_VolumenProfundidad,EPA_VolumenAncho,EPA_VolumenAlto,nrow=3)
+```
+
+No se observa correlación alguna y podríamos decir que el volumen de ventas es independiente de las dimensiones del producto. 
+
+### VOLUMEN - MARGEN DE BENEFICIO
+
+Mostramos la dependencia entre el volumen de ventas de un producto y su margen de beneficio:
+
+```{r VolumenBeneficio, fig.cap="Distribución del Volumen de Ventas según el margen de beneficio asociado."}
+#Scatter Plot Volumen - Beneficio
+EPA_VolumenBeneficio <- ggplot(EPA,aes(x=Beneficio,y=Volumen))+
+  geom_point(color='blue')+
+  ggtitle('Volumen de Ventas según su Margen de Beneficio')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Fracción correspondiente al Margen de Beneficio",limits=c(0,0.5),breaks=seq(0,0.5,0.1))
+#Mostramos gráfico
+EPA_VolumenBeneficio
+```
+
+La correlación es muy pobre aunque se observa que los productos con mejores números en ventas se concentran alrededor de márgenes bajos de beneficio.
+
+## ANÁLISIS MULTIVARIANTE
+
+El objetivo es mostrar gráficos algo más complejos donde se visualicen tantas variables como sea posible.
+
+### VOLUMEN - RESEÑA - TIPO PRODUCTO
+
+Debido a que una de las tareas a realizar consiste en predecir las ventas de ciertos tipos de productos, se va a mostrar el volumen de ventas en función del tipo de producto junto al número de reseña. Esta última se considera por ser la variable que más información nos aporta.
+
+Así pues, mostramos la dependencia entre el volumen de ventas de un producto y la cantidad de reseñas para cada tipo de producto:
+
+```{r VolumenResenaTipo, fig.cap="Distribución del Volumen de Ventas según número de reseñas y tipo de producto.",fig.height=8,fig.width=10}
+#Scatter Plot Volumen - Reseña 5Star - Tipo
+EPA_VolumenStar5Tipo <- ggplot(EPA,aes(x=Star5,y=Volumen,color=Tipo))+geom_point()+
+  ggtitle('Volumen - 5 Estrellas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2500,500))+
+  scale_x_continuous(name ="Número de Reseñas con 5 Estrellas",limits=c(0,600),breaks=seq(0,600,100))
+#Scatter Plot Volumen - Reseña 4Star - Tipo
+EPA_VolumenStar4Tipo <- ggplot(EPA,aes(x=Star4,y=Volumen,color=Tipo))+geom_point()+
+  ggtitle('Volumen - 4 Estrellas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2500,500))+
+  scale_x_continuous(name ="Número de Reseñas con 4 Estrellas",limits=c(0,300),breaks=seq(0,300,50))
+#Scatter Plot Volumen - Reseña 3Star - Tipo
+EPA_VolumenStar3Tipo <- ggplot(EPA,aes(x=Star3,y=Volumen,color=Tipo))+geom_point()+
+  ggtitle('Volumen - 3 Estrellas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2500,500))+
+  scale_x_continuous(name ="Número de Reseñas con 3 Estrellas",limits=c(0,80),breaks=seq(0,80,10))
+#Scatter Plot Volumen - Reseña 2Star - Tipo
+EPA_VolumenStar2Tipo <- ggplot(EPA,aes(x=Star2,y=Volumen,color=Tipo))+geom_point()+
+  ggtitle('Volumen - 2 Estrellas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2500,500))+
+  scale_x_continuous(name ="Número de Reseñas con 2 Estrellas",limits=c(0,50),breaks=seq(0,50,10))
+#Scatter Plot Volumen - Reseña 1Star - Tipo
+EPA_VolumenStar1Tipo <- ggplot(EPA,aes(x=Star1,y=Volumen,color=Tipo))+geom_point()+
+  ggtitle('Volumen - 1 Estrella')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2500,500))+
+  scale_x_continuous(name ="Número de Reseñas con 1 Estrella",limits=c(0,200),breaks=seq(0,200,50))
+#Mostramos gráfico
+ggarrange(EPA_VolumenStar5Tipo,EPA_VolumenStar4Tipo,EPA_VolumenStar3Tipo,
+             EPA_VolumenStar2Tipo,EPA_VolumenStar1Tipo,nrow=3, ncol=2, common.legend = TRUE, legend="right")
+```
+
+El tipo de producto no juega ningún papel y no permite distinguir el volumen de venta. Las reseñas de usuarios tienen la misma influencia sobre todos los productos sin importar a qué clase pertenecen.
+
+Veamos si se diferencia algún patrón para la valoración media.
+
+```{r VolumenResenaMeanTipo, fig.cap="Distribución del Volumen de Ventas según la valoración media de las reseñas."}
+#Scatter Plot Volumen - Reseña Media
+EPA_VolumenStarMTipo <- ggplot(EPA,aes(x=StarM,y=Volumen,color=Tipo))+geom_point()+
+  ggtitle('Volumen de Ventas - Puntuación Media de las Reseñas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Valoración Media según Reseñas",limits=c(0,5),breaks=seq(0,5,0.5))
+EPA_VolumenStarMTipo
+```
+
+De nuevo no existe patrón según el tipo de producto.
+
+Se han realizado otras pruebas combinando el tipo de producto con el resto de variables sin obtener resultados útiles que nos permitan diferenciar patrones. Dada la extensión de estos resultados y su poca relevancia para el análisis, se decide omitirlos.
+
+### VOLUMEN - VALOR MEDIO RESEÑAS - TOTAL RESEÑAS
+
+Con el objetivo de dar respuesta a la segunda de las preguntas planteadas, se decide crear gráficos que relacionen el voluemn de ventas, la valoración media de las reseñas y la cantidad total de estas.
+
+Este ejercicio se realiza tanto para las reseñas del usuario sobre el producto, como para las reseñas del servicio prestado. Veamos el primer caso:
+
+```{r VolumenNResenaMean, fig.cap="Distribución del Volumen de Ventas según la valoración media y el Nº Reseñas."}
+#Se calcula el número de reseñas totales
+EPA$NRes <- EPA %>% with(Star5+Star4+Star3+Star2+Star1)
+#Scatter Plot Volumen - Reseña Media
+EPA_VolumenNStarM <- ggplot(EPA,aes(x=StarM,y=Volumen,color=NRes))+
+  geom_point()+scale_colour_gradientn(colours = rainbow(10),limits=c(0,500),na.value ="#FF0099")+
+  ggtitle('Volumen de Ventas - Puntuación Media de las Reseñas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Valoración Media según Reseñas",limits=c(0,5),breaks=seq(0,5,0.5))
+EPA_VolumenNStarM
+```
+
+El gráfico muestra una tendencia muy clara. El valor medio de las reseñas tiene cierta influencia en el volumen de ventas. Sin embargo, existe una condición para que se dé esta dependencia: el número de reseñas. Una buena valoración media no es relevante si no viene acompañada por una cantidad significativa de reseñas.
+
+Por ejemplo, un producto con buena valoración media pero pocas reseñas no da confianza al consumidor. Este caso sería el de todos los puntos mostrados en color rojo en el gráfico de la figura \@ref(VolumenNResenaMean).
+
+Hagamos el mismo ejercicio para las reseñas del servicio.
+
+```{r VolumenNResenaFraccion, fig.cap="Distribución del Volumen de Ventas según la cantidad de reseñas del servicio y la fracción positiva de estas."}
+#Número de reseñas de servicio
+EPA$NRS <- EPA %>% with(SerPos+SerNeg)
+#Scatter Plot Volumen - Fracción Reseñas Positivas Servicio
+EPA_VolumenNFraccion <- ggplot(EPA,aes(x=SerFra,y=Volumen,color=NRS))+
+  geom_point()+scale_colour_gradientn(colours = rainbow(10),limits=c(0,100),na.value ="#FF0099")+
+  ggtitle('Volumen de Ventas según Fracción de Reseñas Positivas')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_x_continuous(name ="Fracción de Reseñas Positivas",limits=c(0,1),breaks=seq(0,1,0.1))
+#Mostramos gráfico
+EPA_VolumenNFraccion
+```
+
+Vemos que el ejemplo anterior sigue aplicando para las reseñas del servicio (los puntos en rojo siguen dominando para bajos volúmenes de venta). Sin embargo, a diferencia del caso anterior, los productos con una cantidad de reseñas moderada o alta no siguen un patrón tan claro.
+
+### MATRIZ DE COVARIANCIA
+
+Se muestra la matriz de covariancia a modo de resumen para ver las dependencias entre todas las variables.
+
+```{r MatrizCorrelacion, fig.cap="Matriz de Correlación.",fig.height=8,fig.width=8}
+Variables <- c('Volumen','Star5','Star4','Star3','Star2','Star1','StarM','NRes',
+                  'SerPos','SerNeg','SerFra','Precio','Reco','Peso','Prof','Ancho','Alto',
+                  'Beneficio','PC','Laptop','Netbook','Smartphone')
+#Se muestra matriz de correlación
+EPA[Variables] %>% cor() %>% corrplot(method='shade', number.digits = 2, number.cex = 0.7,tl.col='black',
+                                     tl.cex=1,col = COL2('RdBu', 20), addCoef.col = 'black')
+```
+
+Los resultados de la matriz son esenciales para detectar qué variables son claves en la predicción, así como identificar qué variables predictoras son colineales entre ellas. En los siguientes apartados abordaremos este punto.
+
+# MODELADO
+
+El objetivo en esta sección es crear un modelo que nos permita predecir con precisión el volumen de ventas para los nuevos productos.
+
+## PLANTEAMIENTO
+
+Se ajustarán varios modelos a los datos existentes. Tras obtener todos estos modelos, se escogerá el que nos proporcione mejores resultados. No solo consideraremos las métricas del error, el tiempo de ejecución será un factor a tener en cuenta.
+
+Se escogerá algoritmo entre los siguientes:
+
+* Random Forest
+
+* Support Vector Machine
+  
+  - Lineal
+  
+  - Kernel Radial
+  
+* Gradient Boosting
+  
+* K-Nearest Neighbor
+
+Antes de entrar en el ajuste de modelos, debemos realizar dos pasos más: la partición de datos y la selección de variables independientes.
+
+## DEFINICIÓN DE LA PARTICIÓN DE DATOS
+
+Realizamos la partición en los conjuntos de datos de entramiento y test. El tamaño del conjunto de entrenamiento representará el 70% del total de datos.
+
+```{r}
+#Se fija una semilla para conseguir reproducibilidad
+set.seed(100)
+# define una partición 75%/25% train/test del conjunto de datos
+SplitPartition <- createDataPartition(EPA$Volumen, p = 0.7, list = FALSE)
+#Obtenemos una primera partición. El conjunto Test se reserva para la evaluación del modelo definitivo
+EPA_Training <- EPA[SplitPartition,]
+EPA_Test <- EPA[-SplitPartition,]
+```
+
+## SELECCIÓN DE LAS VARIABLES INDEPENDIENTES
+
+En este apartado seleccionaremos las variables independientes. Dados los resultados del análisis exploratorio y la matriz de correlación, las variables que tienen un mayor peso con diferencia son las relacionadas con las reseñas, tanto del producto como del servicio.
+
+Limitaremos la selección de variables a las más relevantes. La razón recae en el coste computacional: incorporar variables irrelevantes tiene un gran inconveniente y es que multiplicaría el tiempo de cálculo, el cual se tratará también como otro criterio de selección.
+
+Revisando los resulados de la matriz de correlación en la figura \@ref(fig:MatrizCorrelacion) se puede extraer varias conclusiones:
+
+* Debido a la perfecta correlación con la variable objetivo y la variable referente al número de reseñas de 5 estrellas, se descarta del análisis.
+
+```{r}
+#Se descarta variable Star5
+Variables<-Variables[-2]
+```
+
+* Existen varias variables que muestran una alta colinealidad entre ellas. Vamos a abordar este problema en el siguiente aparatado.
+
+### MULTICOLINEALIDAD
+
+Debido a la alta colinealidad entre los dos grupos de variables se deben descartar las variables necesarias para evitar colinealidades muy altas. Los criterios para escoger qué variable mantenemos y cuál eliminamos serán:
+
+* Tomaremos como criterio un valor límite de 0.8 para considerar si la colinealidad es aceptable o no.
+
+* Para decidir qué variable nos quedamos entre las que muestran una alta colinealidad, consideraremos también el grado de correlación con la variable objetivo.
+
+Revisemos las variables con mayor colinealidad:
+
+* Las variables referentes al número de reseñas de 1 a 5 estrellas, así como el total de reseñas y el valor medio de estas.
+
+* Las variables referentes a la valoración del servicio.
+
+```{r VarCol, fig.cap="Matriz de Correlación para las variables de mayor colinealidad",fig.height=6,fig.width=6}
+Colinealidad <- c('Volumen','NRes','Star4','Star3','Star2','Star1','SerPos','SerNeg','SerFra')
+EPA[Colinealidad] %>% cor() %>% corrplot(method='shade', number.digits = 2, number.cex = 0.7,tl.col='black',
+                                       tl.cex=1,col = COL2('RdBu', 20), addCoef.col = 'black')
+```
+
+Dados los criterios y la matriz de correlación se hacen dos propuestas:
+
+* PROPUESTA 1:
+
+  - Descartamos la variable *NRes* ya que muestra una alta colinealidad con todas las variables *StarX*.
+  
+  - Entre las variables *StarX*, nos quedamos las que mejor correlan con la variable objetivo y, a su vez, no tenga alta colinealidad entre ellas. Estas son *Star4* y *Star2*. Por lo tanto, descartamos *Star3* y *Star1*.
+  
+  - Se descarta la variable *SerNeg* ya que es colineal con *Star2* y tiene una correlación parecida con la variable objetivo.
+
+Con estos cambios, la nueva matriz de correlación resulta:
+
+```{r VarCol1, fig.cap="Matriz de Correlación para la Propuesta 1.",fig.height=8,fig.width=8}
+#Variables Propuesta 1
+Propuesta1 <- c('Volumen','Star4','Star2','SerPos','SerFra','Precio','Reco','Peso','Prof','Ancho','Alto',
+                  'Beneficio','PC','Laptop','Netbook','Smartphone')
+#Añadirmos la nueva variable a la lista
+EPA[Propuesta1] %>% cor() %>% corrplot(method='shade', number.digits = 2, number.cex = 0.7,tl.col='black',tl.cex=1,col = COL2('RdBu', 20), addCoef.col = 'black')
+```
+
+* PROPUESTA 2:
+
+  - Descartamos las variables *Star3* y *Star1* por la misma razón que en la anterior propuesta.
+  
+  - Descartamos la variable *SerNeg* porque es colineal con *NRes*.
+  
+  - A diferencia de la primera propuesta, mantenemos *NRes* ya que correla algo mejor con la variable objetivo. Sin embargo, y a pesar de que existe colinealidad con *Star4* y *Star2*, no descartamos estas variables. En su lugar, creamos una nueva resultado de combinar estas dos a través de una regresión lineal.
+
+```{r}
+#Regresión lineal con Star4 y Star2
+lm_model <- train(Volumen ~ Star4 + Star2, EPA, method = "lm")
+#Tomamos coeficientes de la regresión
+lm_coef <- summary(lm_model)$coefficients
+#Creamos variable reseña media ponderada
+EPA$Star_lm <- lm_coef[2]*EPA$Star4+lm_coef[3]*EPA$Star2
+```
+
+Y visualizamos la matriz de correlación resultante para esta segunda propuesta.
+
+```{r VarCol2, fig.cap="Matriz de Correlación para la Propuesta 2.",fig.height=8,fig.width=8}
+Propuesta2 <- c('Volumen','Star_lm','NRes','SerPos','SerFra','Precio','Reco','Peso','Prof','Ancho','Alto',
+                  'Beneficio','PC','Laptop','Netbook','Smartphone')
+#Añadirmos la nueva variable a la lista
+EPA[Propuesta2] %>% cor() %>% corrplot(method='shade', number.digits = 2, number.cex = 0.7,tl.col='black',tl.cex=1,col = COL2('RdBu', 20), addCoef.col = 'black')
+```
+
+```{r include=FALSE}
+#SE DEFINE DE NUEVO LA PARTICIÓN INCLUYENDO LA NUEVA VARIABLE
+#Se fija una semilla para conseguir reproducibilidad
+set.seed(100)
+# define una partición 75%/25% train/test del conjunto de datos
+SplitPartition <- createDataPartition(EPA$Volumen, p = 0.7, list = FALSE)
+#Obtenemos una primera partición. El conjunto Test se reserva para la evaluación del modelo definitivo
+EPA_Training <- EPA[SplitPartition,]
+EPA_Test <- EPA[-SplitPartition,]
+```
+
+#### MULTICOLINEALIDAD: PROPUESTA 1
+
+Tomamos las variables vistas anteriormente para la Propuesta 1. Veamos ahora un resumen de las variables que mejor correlan con la variable objetivo:
+
+```{r}
+#Función que devuelve un dataframe con los valores de correlación ordenados de mayor a menor
+Corr_Vars <- function(datos) {
+    Pares <- combn(names(datos), 2, simplify = FALSE)
+    df <- data.frame(Variable1 = rep(0, length(Pares)),
+                     Variable2 = rep(0, length(Pares)), 
+                     Correlacion = rep(0, length(Pares)))
+    for (i in 1:length(Pares)) {
+        df[i, 1] <- Pares[[i]][1]
+        df[i, 2] <- Pares[[i]][2]
+        df[i, 3] <- round(cor(datos[, Pares[[i]][1]], datos[, Pares[[i]][2]]),3)
+    }
+    Corr_VarsDF <- df
+    Corr_VarsDF <- Corr_VarsDF[order(abs(Corr_VarsDF$Correlacion), decreasing = TRUE),]
+    row.names(Corr_VarsDF) <- 1:length(Pares)
+    Corr_VarsDF <- Corr_VarsDF[which(Corr_VarsDF$Variable1 == "Volumen"), ]
+    names(Corr_VarsDF) <- c('Variable 1','Variable 2','Correlación')
+    return(Corr_VarsDF)
+}
+#Mostramos tabla resumen
+Corr_Vars(EPA[Propuesta1]) %>% kbl() %>% kable_classic(full_width=FALSE,html_font='Cambria')
+```
+
+Se define el proceso para calcular el modelo y se obtienen los resultados tomando las 10 mejores variables.
+
+```{r Tree1, fig.cap="Árbol de Decisión. Propuesta 1.",fig.height=8,fig.width=8}
+#Variables seleccionadas Propuesta 1
+Prop1_Sel <- c('Volumen','Star4','SerPos','Star2','SerFra','Peso','Reco','Prof','Ancho','Precio','PC')
+# define el proceso para calcular los parámetros. En este caso se usa un cross validation de 5 particiones
+set.seed(100)
+Process <- trainControl(method = "repeatedcv", repeats = 1, number=5)
+#Entrenamos un modelo de árbol
+CTree1.Fit <- train(Volumen ~ ., data =EPA_Training[Prop1_Sel], method = "ctree",
+                       trControl=Process,tuneLength = 10)
+#Mostramos árbol de decisión
+plot(CTree1.Fit$finalModel)
+```
+
+```{r}
+#Métricas
+CTree1.Fit$results
+```
+
+```{r}
+#Importancia variables
+CTree1.Importance <- varImp(CTree1.Fit)
+plot(CTree1.Importance)
+```
+
+Fijémonos que el tipo de producto no juega ningún papel en el árbol de decisión.
+
+#### MULTICOLINEALIDAD: PROPUESTA 2
+
+Tomamos las variables vistas anteriormente para la Propuesta 2. Veamos ahora un resumen de las variables que mejor correlan con la variable objetivo:
+
+```{r}
+#Mostramos tabla resumen
+Corr_Vars(EPA[Propuesta2]) %>% kbl() %>% kable_classic(full_width=FALSE,html_font='Cambria')
+```
+
+Se define el proceso para calcular el modelo y se obtienen los resultados tomando las 10 mejores variables.
+
+```{r Tree2, fig.cap="Árbol de Decisión. Propuesta 2.",fig.height=4,fig.width=8}
+#Variables seleccionadas Propuesta 2
+Prop2_Sel <- c('Volumen','NRes','Star_lm','SerPos','SerFra','Peso','Reco','Prof','Ancho','Precio','PC')
+# define el proceso para calcular los parámetros. En este caso se usa un cross validation de 5 particiones
+set.seed(100)
+#Entrenamos un modelo de árbol
+CTree2.Fit <- train(Volumen ~ ., data =EPA_Training[Prop2_Sel], method = "ctree",
+                       trControl=Process,tuneLength = 10)
+#Mostramos árbol de decisión
+plot(CTree2.Fit$finalModel)
+```
+
+```{r}
+#Métricas
+CTree2.Fit$results
+```
+
+```{r}
+#Importancia variables
+CTree2.Importance <- varImp(CTree2.Fit)
+plot(CTree2.Importance)
+```
+
+Fijémonos que el tipo de producto no juega ningún papel en el árbol de decisión.
+
+
+## APLICACIÓN DE LOS ALGORITMOS
+
+Llegados a este punto ya estamos preparados para crear nuestros primeros modelos. A continuación se obtienen los modelos predictivos utilizando cada una de las propuestas.
+
+### RANDOM FOREST
+
+En este apartado consideraremos el algoritmo Random Forest.
+
+#### OPTIMIZACIÓN DE PARÁMETROS
+
+Para el algoritmo *RandomForest*, tenemos un único parámetro a optimizar: *mtry*. A continuación se define el proceso de optimización de dicho parámetro.
+
+* PROPUESTA 1
+
+```{r}
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+RF1.Time <- system.time(RF1.Fit <- train(Volumen ~ ., data =EPA_Training[Prop1_Sel], method = "rf",
+                                  trControl=Process, tuneLength = 10))
+```
+
+* PROPUESTA 2
+
+```{r}
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+RF2.Time <- system.time(RF2.Fit <- train(Volumen ~ ., data =EPA_Training[Prop2_Sel], method = "rf",
+                                  trControl=Process, tuneLength = 10))
+```
+
+#### FIABILIDAD DE LAS PREDICCIONES
+
+Se muestra el valor de las métricas. Prestamos especial atención al coeficiente de determinación (Rsquared)
+
+* PROPUESTA 1
+
+```{r}
+#Métricas
+RF1.Metrics <- RF1.Fit$results[which.max(RF1.Fit$results[,'Rsquared']),-1] %>%    
+                  cbind(data.frame('Tiempo'=RF1.Time['elapsed']))
+RF1.Fit$results
+```
+
+* PROPUESTA 2
+
+```{r}
+#Métricas
+RF2.Metrics <- RF2.Fit$results[which.max(RF2.Fit$results[,'Rsquared']),-1] %>%    
+                  cbind(data.frame('Tiempo'=RF2.Time['elapsed']))
+RF2.Fit$results
+```
+
+#### IMPORTANCIA DE LAS VARIABLES
+
+Veamos las variables de mayor peso en la regresión
+
+* PROPUESTA 1
+
+
+```{r}
+#Importancia variables
+RF1.Importance <- varImp(RF1.Fit)
+plot(RF1.Importance)
+```
+* PROPUESTA 2
+
+
+```{r}
+#Importancia variables
+RF2.Importance <- varImp(RF2.Fit)
+plot(RF2.Importance)
+```
+
+
+
+
+
+
+
+
+
+
+
+### SUPPORT VECTOR MACHINE. LINEAL.
+
+En este apartado consideraremos el algoritmo Support Vector Machine Lineal.
+
+#### OPTIMIZACIÓN DE PARÁMETROS
+
+Para el algoritmo escogido, tenemos un único parámetro a optimizar: *C*. A continuación se define el proceso de optimización de dicho parámetro.
+
+* PROPUESTA 1
+
+```{r}
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+SVML1.Time <- system.time(SVML1.Fit <- train(Volumen ~ ., data =EPA_Training[Prop1_Sel], method = "svmLinear",
+                                  trControl=Process, tuneLength = 10))
+```
+
+* PROPUESTA 2
+
+```{r}
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+SVML2.Time <- system.time(SVML2.Fit <- train(Volumen ~ ., data =EPA_Training[Prop2_Sel], method = "svmLinear",
+                                  trControl=Process, tuneLength = 10))
+```
+
+#### FIABILIDAD DE LAS PREDICCIONES
+
+Se muestra el valor de las métricas. Prestamos especial atención al coeficiente de determinación (Rsquared)
+
+* PROPUESTA 1
+
+```{r}
+#Métricas
+SVML1.Metrics <- SVML1.Fit$results[which.max(SVML1.Fit$results[,'Rsquared']),-1] %>%    
+                  cbind(data.frame('Tiempo'=SVML1.Time['elapsed']))
+SVML1.Fit$results
+```
+
+* PROPUESTA 2
+
+```{r}
+#Métricas
+SVML2.Metrics <- SVML2.Fit$results[which.max(SVML2.Fit$results[,'Rsquared']),-1] %>%    
+                  cbind(data.frame('Tiempo'=SVML2.Time['elapsed']))
+SVML2.Fit$results
+```
+
+#### IMPORTANCIA DE LAS VARIABLES
+
+Veamos las variables de mayor peso en la regresión
+
+* PROPUESTA 1
+
+
+```{r}
+#Importancia variables
+SVML1.Importance <- varImp(SVML1.Fit)
+plot(SVML1.Importance)
+```
+* PROPUESTA 2
+
+
+```{r}
+#Importancia variables
+SVML2.Importance <- varImp(SVML2.Fit)
+plot(SVML2.Importance)
+```
+
+
+### SUPPORT VECTOR MACHINE. RADIAL.
+
+En este apartado consideraremos el algoritmo Support Vector Machine Radial.
+
+#### OPTIMIZACIÓN DE PARÁMETROS
+
+Para el algoritmo escogido, tenemos dos parámetros a optimizar: *C* y *sigma*. A continuación se define el proceso de optimización de dichos parámetros.
+
+* PROPUESTA 1
+
+```{r}
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+SVMR1.Time <- system.time(SVMR1.Fit <- train(Volumen ~ ., data =EPA_Training[Prop1_Sel], method = "svmRadial",
+                                  trControl=Process, tuneLength = 10))
+```
+
+* PROPUESTA 2
+
+```{r}
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+SVMR2.Time <- system.time(SVMR2.Fit <- train(Volumen ~ ., data =EPA_Training[Prop2_Sel], method = "svmRadial",
+                                  trControl=Process, tuneLength = 10))
+```
+
+#### FIABILIDAD DE LAS PREDICCIONES
+
+Se muestra el valor de las métricas. Prestamos especial atención al coeficiente de determinación (Rsquared)
+
+* PROPUESTA 1
+
+```{r}
+#Métricas
+SVMR1.Metrics <- SVMR1.Fit$results[which.max(SVMR1.Fit$results[,'Rsquared']),-c(1,2)] %>%    
+                  cbind(data.frame('Tiempo'=SVMR1.Time['elapsed']))
+SVMR1.Fit$results
+```
+
+* PROPUESTA 2
+
+```{r}
+#Métricas
+SVMR2.Metrics <- SVMR2.Fit$results[which.max(SVMR2.Fit$results[,'Rsquared']),-c(1,2)] %>%    
+                  cbind(data.frame('Tiempo'=SVMR2.Time['elapsed']))
+SVMR2.Fit$results
+```
+
+#### IMPORTANCIA DE LAS VARIABLES
+
+Veamos las variables de mayor peso en la regresión
+
+* PROPUESTA 1
+
+
+```{r}
+#Importancia variables
+SVMR1.Importance <- varImp(SVMR1.Fit)
+plot(SVMR1.Importance)
+```
+* PROPUESTA 2
+
+
+```{r}
+#Importancia variables
+SVMR2.Importance <- varImp(SVMR2.Fit)
+plot(SVMR2.Importance)
+```
+
+
+### GRADIENT BOOSTING.
+
+En este apartado consideraremos el algoritmo Gradient Boosting.
+
+#### OPTIMIZACIÓN DE PARÁMETROS
+
+Para el algoritmo escogido tenemos varios parámetros a optimizar:
+
+* *ntrees*
+* *interaction.depth*
+* *shrinkage*
+* *n.minobsinnode*
+
+A continuación se define el proceso de optimización de los parámetros.
+
+* PROPUESTA 1
+
+```{r}
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+GB1.Time <- system.time(capture.output(GB1.Fit <- train(Volumen ~ ., data =EPA_Training[Prop1_Sel], method = "gbm",
+                                  trControl=Process, tuneLength = 10)))
+```
+
+* PROPUESTA 2
+
+```{r}
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+GB2.Time <- system.time(capture.output(GB2.Fit <- train(Volumen ~ ., data =EPA_Training[Prop2_Sel], method = "gbm",
+                                  trControl=Process, tuneLength = 10)))
+```
+
+#### FIABILIDAD DE LAS PREDICCIONES
+
+Se muestra el valor de las métricas. Prestamos especial atención al coeficiente de determinación (Rsquared)
+
+* PROPUESTA 1
+
+```{r}
+#Métricas
+GB1.Metrics <- GB1.Fit$results[which.max(GB1.Fit$results[,'Rsquared']),-seq(1,4)] %>%    
+                  cbind(data.frame('Tiempo'=GB1.Time['elapsed']))
+GB1.Fit$results[which.max(GB1.Fit$results[,'Rsquared']),]
+```
+
+* PROPUESTA 2
+
+```{r}
+#Métricas
+GB2.Metrics <- GB2.Fit$results[which.max(GB2.Fit$results[,'Rsquared']),-seq(1,4)] %>%    
+                  cbind(data.frame('Tiempo'=GB2.Time['elapsed']))
+GB2.Fit$results[which.max(GB2.Fit$results[,'Rsquared']),]
+```
+
+#### IMPORTANCIA DE LAS VARIABLES
+
+Veamos las variables de mayor peso en la regresión
+
+* PROPUESTA 1
+
+
+```{r}
+#Importancia variables
+GB1.Importance <- varImp(GB1.Fit)
+plot(GB1.Importance)
+```
+* PROPUESTA 2
+
+
+```{r}
+#Importancia variables
+GB2.Importance <- varImp(GB2.Fit)
+plot(GB2.Importance)
+```
+
+### K-NEAREST NEIGHBOR
+
+En este apartado consideraremos el algoritmo K-Nearest Neighbor.
+
+#### OPTIMIZACIÓN DE PARÁMETROS
+
+Para el algoritmo escogido tenemos varios parámetros a optimizar:
+* *kmax*
+* *distance*
+* *kernel*
+
+A continuación se define el proceso de optimización de los parámetros.
+
+* PROPUESTA 1
+
+```{r}
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+KNN1.Time <- system.time(KNN1.Fit <- train(Volumen ~ ., data =EPA_Training[Prop1_Sel], method = "kknn",
+                                  trControl=Process, tuneLength = 10))
+```
+
+* PROPUESTA 2
+
+```{r}
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+KNN2.Time <- system.time(KNN2.Fit <- train(Volumen ~ ., data =EPA_Training[Prop2_Sel], method = "kknn",
+                                  trControl=Process, tuneLength = 10))
+```
+
+#### FIABILIDAD DE LAS PREDICCIONES
+
+Se muestra el valor de las métricas. Prestamos especial atención al coeficiente de determinación (Rsquared)
+
+* PROPUESTA 1
+
+```{r}
+#Métricas
+KNN1.Metrics <- KNN1.Fit$results[which.max(KNN1.Fit$results[,'Rsquared']),-seq(1,3)] %>%    
+                  cbind(data.frame('Tiempo'=KNN1.Time['elapsed']))
+KNN1.Fit$results
+```
+
+* PROPUESTA 2
+
+```{r}
+#Métricas
+KNN2.Metrics <- KNN2.Fit$results[which.max(KNN2.Fit$results[,'Rsquared']),-seq(1,3)] %>%    
+                  cbind(data.frame('Tiempo'=KNN2.Time['elapsed']))
+KNN2.Fit$results
+```
+
+#### IMPORTANCIA DE LAS VARIABLES
+
+Veamos las variables de mayor peso en la regresión
+
+* PROPUESTA 1
+
+
+```{r}
+#Importancia variables
+KNN1.Importance <- varImp(KNN1.Fit)
+plot(KNN1.Importance)
+```
+* PROPUESTA 2
+
+
+```{r}
+#Importancia variables
+KNN2.Importance <- varImp(KNN2.Fit)
+plot(KNN2.Importance)
+```
+
+
+# EVALUACIÓN Y REPORTE DE LOS RESULTADOS
+
+Ahora ya hemos visto los resultados de todos los modelos propuestos y estamos en disposición de analizar cuál de ellos va a proporcionar mejores resultados.
+
+## SELECCIÓN DEL MODELO Y JUSTIFICACIÓN
+
+En el ajuste de cada uno de los modelos se han calculado las métricas sobre su rendimiento. En la siguiente tabla se muestra un resumen de tanto las métricas como el tiempo de ejecución de cada modelo.
+
+```{r}
+#Vectores con nombres
+Modelos <- c('RF1','SVML1','SVMR1','GB1','KNN1','RF2','SVML2','SVMR2','GB2','KNN2')
+Metricas <- c('Rsquared','MAE','RMSE','Tiempo','RsquaredSD','MAESD','RMSESD')
+Metricas_Norm <- c('RMSE01','Rsquared01','MAE01','RMSESD01','RsquaredSD01','MAESD01','Tiempo01')
+#Creamos dataframe con las métricas de todos los modelos
+Metric_Summary <- rbind(RF1.Metrics,SVML1.Metrics,SVMR1.Metrics,GB1.Metrics,KNN1.Metrics,
+                         RF2.Metrics,SVML2.Metrics,SVMR2.Metrics,GB2.Metrics,KNN2.Metrics)
+#Creamos dataframe con valores 0-1 (se normalizan valores) donde 0 es mala calidad y 1 buena.
+Metric_Summary01 <- preProcess(Metric_Summary, method=c("range")) %>% predict(Metric_Summary)
+colnames(Metric_Summary01) <- Metricas_Norm
+Metric_Summary01['Rsquared01'] <- 1-Metric_Summary01$Rsquared01 #en el caso de R2 se debe invertir la escala
+#Se unen dataframes
+Metric_Summary_HM <-  cbind(Metric_Summary,Metric_Summary01,data.frame('Modelo'=Modelos))
+#Se redondean valores de las métricas
+Metric_Summary_HM[c(2,5)] <- round(Metric_Summary_HM[c(2,5)],4)
+Metric_Summary_HM[c(1,3,4,6)] <- round(Metric_Summary_HM[c(1,3,4,6)],0)
+Metric_Summary_HM[7] <- round(Metric_Summary_HM[7],2)
+#Se pasa tabla de forma ancha a larga
+Metric_Summary_HM <- Metric_Summary_HM %>% gather(Metrica, value, RMSE:Tiempo) %>% cbind(Metric_Summary01 %>% gather(Metrica01, Norm, RMSE01:Tiempo01))
+#Se transforman a variables factor
+Metric_Summary_HM$Metrica <- factor(Metric_Summary_HM$Metrica,levels=Metricas)
+Metric_Summary_HM$Modelo <- factor(Metric_Summary_HM$Modelo,levels=Modelos)
+```
+
+
+  
+```{r SummaryMetrica, fig.cap="Resumen de las Métricas resultantes para cada uno de los modelos analizados.",fig.width=9,fig.height=4}
+sum1<-filter(Metric_Summary_HM, grepl('1', Modelo)) %>%
+  ggplot(aes(x=Metrica,y=Modelo,fill=Norm))+geom_bin2d()+
+  geom_text(aes(label = value))+
+  scale_fill_gradient2(midpoint=0.5, low="white", mid="orange",high="red",
+                       space ="Lab",breaks=c(0,1),labels = c('Mejor','Peor'),
+                       name = "Calidad del Modelo")+
+  guides(fill = guide_colorbar(title.position = "top"))+
+  theme(axis.text.x = element_text(color='black',size=10,angle=0),
+        legend.text=element_text(size=11),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_x_discrete(name ="Métrica",guide=guide_axis(n.dodge=2))+
+  scale_y_discrete(name ="Modelo Predictivo",labels=c('RF','SVML','SVMR','GB','KNN'))+
+  ggtitle('RESUMEN MÉTRICAS - PROPUESTA 1')
+
+sum2<-filter(Metric_Summary_HM, grepl('2', Modelo)) %>%
+  ggplot(aes(x=Metrica,y=Modelo,fill=Norm))+geom_bin2d()+
+  geom_text(aes(label = value))+
+    scale_fill_gradient2(midpoint=0.5, low="white", mid="orange",high="red",
+                         space ="Lab",breaks=c(0,1),labels = c('Mejor','Peor'),
+                         name = "Calidad del Modelo")+
+  guides(fill = guide_colorbar(title.position = "top"))+
+  theme(axis.text.x = element_text(color='black',size=10,angle=0),
+        legend.text=element_text(size=11),
+        axis.text.y=element_blank(),axis.title.y=element_blank(),axis.ticks.y=element_blank())+
+  scale_x_discrete(name ="Métrica",guide=guide_axis(n.dodge=2))+
+  ggtitle('RESUMEN MÉTRICAS - PROPUESTA 2')
+
+ggarrange(sum1,sum2,nrow=1,ncol=2,common.legend = TRUE, legend='bottom')
+```      
+
+Se observa que la propuesta 2 ofrece mejores resultados en general. En cuanto a los algoritmos, *Random Forest* destaca sobre los demás y con diferencia. Por lo tanto, el modelo resultante del algoritmo *Random Forest* junto a la segunda propuesta en la selección de *features* da los mejores resultados y se convierte en el modelo escogido para realizar las predicciones finales.
+
+Antes de abarcar esta tarea, se deben ajustar los parámetros con precisión sobre el subgrupo test así como analizar el error asociado.
+
+## AJUSTE DEL MODELO SELECCIONADO
+
+Ajustamos el modelo definitivo, en este caso el random forest utilizando la segunda propuesta de features.
+
+### OPTIMIZACIÓN DE PARÁMETROS
+
+Para el algoritmo *RandomForest*, tenemos un único parámetro a optimizar: *mtry*. A continuación se define el proceso de optimización de dicho parámetro. Esta vez damos una lista de valores sobre los que optimizar. Esta lista se basa en los resultados obtenidos anteriormente.
+
+```{r}
+# Definimos un Grid con los valores entre los que optimizar
+ModSel.Grid <- expand.grid(mtry = seq(5,15))
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+ModSel.Time <- system.time(ModSel.Fit <- train(Volumen ~ ., data =EPA_Training[Prop2_Sel], method = "rf",
+                                  trControl=Process, tuneGrid=ModSel.Grid))
+```
+
+### FIABILIDAD DE LAS PREDICCIONES
+
+Se muestra el valor de las métricas. Prestamos especial atención al coeficiente de determinación (Rsquared)
+
+```{r}
+#Métricas
+ModSel.Metrics <- ModSel.Fit$results[which.max(ModSel.Fit$results[,'Rsquared']),-1] %>%    
+                  cbind(data.frame('Tiempo'=ModSel.Time['elapsed']))
+ModSel.Fit$results[which.max(ModSel.Fit$results[,'Rsquared']),]
+```
+
+```{r}
+#Importancia variables
+ModSel.Importance <- varImp(ModSel.Fit)
+plot(ModSel.Importance)
+```
+
+### ANÁLISIS DEL ERROR
+
+```{r}
+#Predicciones
+ModSel.Predict <- predict(ModSel.Fit,EPA_Test[Prop2_Sel])
+#Error Absoluto
+ModSel.AbsolutError <- abs(EPA_Test['Volumen']-ModSel.Predict)
+#Error Relativo
+ModSel.RelativeError <- ModSel.AbsolutError/EPA_Test['Volumen']
+#Dataframe con los datos del error y las variables más relevantes para el análisis
+Error_DF <- errors_df <- as.data.frame(cbind(EPA_Test['Volumen'], ModSel.Predict, ModSel.AbsolutError,
+                         ModSel.RelativeError,EPA_Test['Tipo'],EPA_Test['NRes'],EPA_Test['SerPos']))
+colnames(Error_DF) <- c('Real','Predicho','ErrorAbsoluto','ErrorRelativo','Tipo','NRes','SerPos')
+```
+
+
+
+```{r VolumenRealPredicho, fig.cap="Error asociado a las predicciones. Valores reales contra predichos."}
+#Scatter Plot Volumen Real - Volumen Predicho
+EPA_VolumenRealPredicho <- Error_DF %>% ggplot(aes(x=Real,y=Predicho,color=Tipo))+geom_point()+
+  ggtitle('Volumen de Ventas - Valores Reales y Predichos')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_x_continuous(name ="Volumen de Ventas Real",limits=c(0,2200),breaks=seq(0,2200,200))+
+  scale_y_continuous(name ="Volumen de Ventas Predicho",limits=c(0,2200),breaks=seq(0,2200,200))+
+  geom_abline(intercept = 0, slope = 1, color="black",linetype="dashed", size=0.3)
+EPA_VolumenRealPredicho
+```
+
+El gráfico de la figura \@ref(fig:VolumenRealPredicho) nos da las primeras pistas sobre la distribución del error. Las discrepancias más significativas se dan para valores altos del volumen de ventas.
+
+
+```{r NResError, fig.cap="Error asociado a las predicciones en función de la variable predictora más relevante.",fig.height=4,fig.width=8}
+#Scatter Plot Nº Reseñas - Error Absoluto
+EPA_NResErrorA <- Error_DF %>% ggplot(aes(x=NRes,y=ErrorAbsoluto,color=Tipo))+geom_point()+
+  ggtitle('ERROR ABSOLUTO')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0),
+        legend.key.width = unit(1.5, 'cm'))+
+  scale_x_continuous(name ="Número Total de Reseñas",limits=c(0,3000),breaks=seq(0,3000,500))+
+  scale_y_continuous(name ="Error Absoluto",limits=c(0,700),breaks=seq(0,700,100))
+#Scatter Plot Nº Reseñas - Error Relativo
+EPA_NResErrorR <- Error_DF %>% ggplot(aes(x=NRes,y=ErrorRelativo,color=Tipo))+geom_point()+
+  ggtitle('ERROR RELATIVO')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0),
+        legend.key.width = unit(1.5, 'cm'))+
+  scale_x_continuous(name ="Número Total de Reseñas",limits=c(0,3000),breaks=seq(0,3000,500))+
+    scale_y_continuous(name ="Error Relativo",limits=c(0,0.7),breaks=seq(0,0.7,0.1))
+ggarrange(EPA_NResErrorA,EPA_NResErrorR,nrow=1,ncol=2, legend='bottom',common.legend = TRUE)
+```
+
+
+El error absoluto aumenta cuanto mayor es el número de reseñas que, a su vez, coincide con mayores valores del volumen de ventas. Se deberá tener especial precaución con los productos con mayor número de reseñas ya que el volumen de ventas real puede variar significativamente. Sin embargo, el error relativo no muestra una tendencia clara y toma valores muy dispares.
+
+En los gráficos \@ref(fig:VolumenRealPredicho) y \@ref(fig:NResError) se diferencia las predicciones según el tipo de producto. De nuevo queda en evidencia que el tipo de producto no juega un papel relevante y el error no se ve influenciado por este.
+
+Nótese que la partición ha dejado fuera del subgrupo Test a los productos del tipo Notebook. Dada la irrelevancia de esta variable, no se le va a dar importancia a este hecho.
+
+## PREDICCIÓN DE RESULTADOS
+
+Para predecir los resultados finales necesitamos tener las mismas variables que hemos creado en el conjunto de datos de entramiento. El primer paso será crearlos en el conjunto objetivo:
+
+```{r}
+#Creamos variable reseña media ponderada para el conjunto de datos objetivo
+NPA$Star_lm <- lm_coef[2]*NPA$Star4+lm_coef[3]*NPA$Star2
+#Se calcula la reseña media
+NPA$SerFra <- NPA %>% with(SerPos/(SerPos+SerNeg))
+NPA$SerFra[is.na(NPA$SerFra)] <- 0
+```
+
+Obtenemos el modelo
+
+```{r}
+#Se calculan las métricas a través del proceso definido por la función train() (parámetros escogidos automáticamente)
+set.seed(100)
+Model.Time <- system.time(Model.Fit <- train(Volumen ~ ., data =EPA[Prop2_Sel], method = "rf",
+                                  trControl=Process, tuneGrid=ModSel.Grid))
+#Métricas
+Model.Metrics <- Model.Fit$results[which.max(Model.Fit$results[,'Rsquared']),-1] %>%    
+                  cbind(data.frame('Tiempo'=Model.Time['elapsed']))
+Model.Fit$results[which.max(Model.Fit$results[,'Rsquared']),]
+```
+
+Realizamos las predicciones sobre el conjunto objetivo
+
+```{r}
+#Predicciones
+NPA$Volumen <- predict(Model.Fit,NPA[Prop2_Sel])
+```
+
+Se muestra la distribución de las predicciones
+
+#### {.tabset .unlisted .unnumbered}
+
+##### RESUMEN GRÁFICO {.unlisted .unnumbered}
+
+```{r VolumenPredicho, fig.cap="Distribución de la variable referente al volumen de ventas.",fig.width=8}
+#Violin plot Beneficio EPA
+NPA_Volumen <- ggplot(NPA,aes(x=factor(0),y=Volumen))+
+  geom_violin(color="black",fill='indianred1')+
+  geom_boxplot(width=0.1)+
+  ggtitle('Volumen de Ventas - Nuevos Productos')+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        axis.text.y = element_text(color='black',size=10,angle=0))+
+  scale_y_continuous(name ="Volumen de Ventas")
+
+ggarrange(EPA_Volumen2,NPA_Volumen,nrow=1,ncol=2)
+```
+##### TABLA RESUMEN {.unlisted .unnumbered}
+
+```{r}
+#Mostramos tabla resumen
+NPA$Volumen <- round(NPA$Volumen,0)
+NPA[c('Tipo','ID','Volumen')] %>% kbl() %>% kable_classic(full_width=FALSE,html_font='Cambria')
+```
+
+#### {.unlisted .unnumbered}
+
+A continuación se muestra el volumen de ventas de ambos conjuntos de datos en función de las variables más relevantes del análisis.
+
+```{r Predicciones, fig.cap="Predicciones del volumen de ventas en función de las variables más relevantes.",fig.width=8,fig.height=4}
+EPA$Datos <- 'Valores Históricos'
+NPA$Datos <- 'Nuevos Productos'
+Pre_NRes <- rbind(EPA[c('NRes','Volumen','Datos')],NPA[c('NRes','Volumen','Datos')]) %>% 
+  ggplot(aes(x=NRes,y=Volumen,color=Datos))+geom_point()+
+  ggtitle('PREDICCIÓN - Nº RESEÑAS')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_x_continuous(name ="Número Total de Reseñas",limits=c(0,3000),breaks=seq(0,3000,500))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))
+
+Pre_SerPos <- rbind(EPA[c('SerPos','Volumen','Datos')],NPA[c('SerPos','Volumen','Datos')]) %>% 
+  ggplot(aes(x=SerPos,y=Volumen,color=Datos))+geom_point()+
+  ggtitle('PREDICCIÓN - SERVICIO POSITIVO')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_x_continuous(name ="Número de Reseñas Positivas",limits=c(0,350),breaks=seq(0,350,50))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))
+
+ggarrange(Pre_NRes,Pre_SerPos,nrow=1,ncol=2, legend='bottom',common.legend = TRUE)
+```
+
+Las predicciones son muy fieles a los datos históricos considerando el número total de reseñas así como el número de reseñas referentes al servicio, con la excepción de los dos puntos asociados a las muestras de mayor volumen de ventas. Sin embargo, estos dos puntos que se alejan de la tendencia general, no pertenecen a los tipos de interés, sino que se trata de una tablet y una videconsola (veáse la figura \@ref(fig:PrediccionesTipo)).
+
+```{r PrediccionesTipo, fig.cap="Predicciones del volumen de ventas en función del total de reseñas.",fig.width=8,fig.height=4}
+Pre_NResTipo <- ggplot(NPA,aes(x=NRes,y=Volumen,color=Tipo))+geom_point()+
+  ggtitle('PREDICCIÓN - Nº RESEÑAS')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_x_continuous(name ="Número Total de Reseñas",limits=c(0,3000),breaks=seq(0,3000,500))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))
+
+Pre_SerPosTipo <- ggplot(NPA,aes(x=SerPos,y=Volumen,color=Tipo))+geom_point()+
+  ggtitle('PREDICCIÓN - SERVICIO POSITIVO')+
+  theme(axis.text.y = element_text(color='black',size=10,angle=0),
+        axis.text.x = element_text(color='black',size=10,angle=0))+
+  scale_x_continuous(name ="Número de Reseñas Positivas",limits=c(0,350),breaks=seq(0,350,50))+
+  scale_y_continuous(name ="Volumen de Ventas",limits=c(0,2200),breaks=seq(0,2200,200))
+
+ggarrange(Pre_NResTipo,Pre_SerPosTipo,nrow=1,ncol=2, legend='bottom',common.legend = TRUE)
+```
+
+## RESUMEN DE RESULTADOS Y CONCLUSIONES
+
+El modelo definitivo nos proporciona una buena precisión y es fiel a los datos históricos con alguna excepción. El modelo no es capaz de predecir con precisión los puntos de mayor volumen de ventas. La razón recae en la falta de datos históricos cercanos a estos para algunas de las variables predictoras. En consecuencia, la precisión podría verse afectada para estos productos.
+
+Estos puntos se pueden identificar fácilmente en la figura \@ref(fig:Predicciones) izquierda. Cuando mostramos los resultados en función del total de reseñas, aparecen dos puntos aislados (en rojo) alejados de todo dato histórico. Afortunadamente, estos productos no coinciden con los productos objetivo, sino que se tratan de una tablet y una videconsola (veáse la figura \@ref(fig:PrediccionesTipo)).
+
+A pesar de ello, para otras variables predictoras como el número de reseñas positivas del servicio, sí tenemos datos cercanos. Se puede decir que la predicción si es fiel a la tendencia marcada por algunas variables predictoras (veáse la figura \@ref(fig:Predicciones) derecha).
+
+Recordemos ahora las preguntas iniciales que se nos plantean:
+
+* **Predecir las ventas de los siguientes productos: Ordenadores, portátiles, netbooks y teléfonos móviles.**
+
+Se ha comprobado que el tipo de producto no juega ningún papel en el volumen de ventas. Esto significa que el modelo de predicción es independiente del tipo de producto y las variables predictoras son comunes para todos ellos.
+
+A continuación se muestra una tabla resumen de las predicciones de los productos de interés:
+
+```{r}
+#Mostramos tabla resumen
+NPA[c('Tipo','ID','Volumen')] %>%
+  filter(Tipo=='PC' | Tipo=='Smartphone' | Tipo=='Netbook' | Tipo=='Laptop') %>%
+  kbl() %>% kable_classic(full_width=FALSE,html_font='Cambria')
+```
+
+Se debe destacar el número de ventas de cuatro productos en el siguiente orden: Netbook (180), Smartphone (194), PC (171) y Smartphone (193). El resto de valores son más discretos.
+
+* **Evaluar el impacto en ventas que tienen las reseñas de los clientes sobre los productos y servicios.**
+
+Durante el análisis exploratorio se visualizó cómo afectan las reseñas al volumen de ventas. 
+
+La cantidad de reseñas de 5 estrellas afecta directamente al volumen de ventas, correlando de forma perfecta y siendo esta directamente proporcional al número de reseñas. En la figura \@ref(fig:VolumenResena) puede verse en detalle que la relación entre las ventas y las reseñas es de 4:1, por lo que cada reseña de máxima puntuación te garantiza 4 ventas.
+
+A medida que bajamos el grado de satisfacción de la reseña, se pierde correlación con el volumen de ventas, pero la correlación sigue siendo más que aceptable para reseñas de 4 y hasta 3 estrellas.
+
+Si consideramos el valor medio de las reseñas, el gráfico de la figura \@ref(fig:VolumenNResenaMean) muestra una tendencia muy clara. El valor medio de las reseñas tiene cierta influencia en el volumen de ventas. Sin embargo, existe una condición para que se dé esta dependencia: el número de reseñas. Una buena valoración media no es relevante si no viene acompañada por una cantidad significativa de reseñas.
+
+Por ejemplo, un producto con buena valoración media pero pocas reseñas no da confianza al consumidor. Este caso sería el de todos los puntos mostrados en color rojo en el gráfico de la figura \@ref(fig:VolumenNResenaMean).
+
+A pesar de todo, se puede concluir que el número de reseñas para cada grado de valoración (así como el) aporta muchísimas más información que el valor medio.
+
+Para las reseñas del servicio ocurre algo parecido. Vemos que el ejemplo anterior sigue aplicando para las reseñas del servicio según se muestra en la figura \@ref(fig:VolumenNResenaFraccion) (los puntos en rojo siguen dominando para bajos volúmenes de venta). Sin embargo, a diferencia de las reseñas del producto, las muestras con una cantidad de reseñas moderada o alta no siguen un patrón tan claro.
